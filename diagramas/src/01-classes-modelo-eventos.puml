@@ -1,0 +1,167 @@
+@startuml 01-classes-modelo-eventos
+title Modelagem estática — modelo de eventos CEP (app bancário, caso Nubank)
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam classFontSize 12
+hide empty methods
+left to right direction
+
+package "Contrato formal de evento" {
+  abstract class Evento {
+    + id : UUID
+    + tipo : String
+    + versao : SemVer
+    + entidade : RefEntidade
+    + origem : String
+    + t_ocorrencia : Instant
+    + t_ingestao : Instant
+    + atributos : Map
+    + qualidade : Qualidade
+    + correlacao : UUID
+    + natureza : Natureza
+  }
+  enum Natureza {
+    NEGOCIO
+    TECNICO
+  }
+  class Qualidade {
+    + confianca : float [0..1]
+    + completo : boolean
+    + atrasado : boolean
+  }
+  Evento *-- Qualidade
+  Evento ..> Natureza
+}
+
+package "Níveis de abstração" {
+  class EventoSimples <<nível 1>> {
+    + valor : Object
+  }
+  class EventoAgregado <<nível 2>> {
+    + funcao : SUM | COUNT | AVG | P99
+    + janela : Janela
+    + resultado : double
+  }
+  class EventoComplexo <<nível 3>> {
+    + padrao : String
+    + score_risco : float
+    + acao_disparada : Acao
+  }
+  Evento <|-- EventoSimples
+  Evento <|-- EventoAgregado
+  Evento <|-- EventoComplexo
+  EventoAgregado o-- "1..*" EventoSimples : resume >
+  EventoComplexo o-- "2..*" Evento : evidencias >
+}
+
+package "Eventos simples de negócio" {
+  class LoginRealizado
+  class DispositivoRegistrado {
+    + id_dispositivo : String
+    + novo : boolean
+  }
+  class LimiteAlterado {
+    + produto : PIX_NOTURNO | CARTAO
+    + de : Money
+    + para : Money
+  }
+  class FavorecidoAdicionado
+  class PixIniciado {
+    + valor : Money
+    + chave_destino : ChavePix
+    + idempotency_key : String
+  }
+  class PixLiquidado
+  class PixRecebido
+  class CompraCartaoSolicitada {
+    + valor : Money
+    + mcc : String
+    + presencial : boolean
+    + geo : GeoPonto
+  }
+  class DevolucaoMEDSolicitada
+}
+
+package "Eventos simples técnicos" {
+  class TelemetriaSessao {
+    + ritmo_digitacao_ms : int
+    + colou_texto : boolean
+    + tempo_tela_ms : int
+  }
+  class IntegridadeDispositivo {
+    + root_ou_emulador : boolean
+  }
+  class LatenciaSPIMedida {
+    + ms : int
+  }
+  class ErroIntegracaoSPI {
+    + codigo : String
+  }
+}
+
+EventoSimples <|-- LoginRealizado
+EventoSimples <|-- DispositivoRegistrado
+EventoSimples <|-- LimiteAlterado
+EventoSimples <|-- FavorecidoAdicionado
+EventoSimples <|-- PixIniciado
+EventoSimples <|-- PixLiquidado
+EventoSimples <|-- PixRecebido
+EventoSimples <|-- CompraCartaoSolicitada
+EventoSimples <|-- DevolucaoMEDSolicitada
+EventoSimples <|-- TelemetriaSessao
+EventoSimples <|-- IntegridadeDispositivo
+EventoSimples <|-- LatenciaSPIMedida
+EventoSimples <|-- ErroIntegracaoSPI
+
+package "Motor de regras (ECA)" {
+  class RegraECA {
+    + id : String
+    + evento_gatilho : String
+    + condicao : Expressao
+    + acao : Acao
+    + janela : Janela
+    + versao : SemVer
+  }
+  class Janela {
+    + tipo : TUMBLING | SLIDING | SESSION
+    + duracao : Duration
+    + deslize : Duration
+    + atraso_tolerado : Duration
+  }
+  enum Acao {
+    APROVAR
+    DESAFIAR_AUTENTICACAO
+    CANCELAR
+    BLOQUEIO_CAUTELAR
+    NOTIFICAR_CLIENTE
+    ALERTAR_ANALISTA
+    ATIVAR_MODO_DEGRADADO
+  }
+  RegraECA *-- Janela
+  RegraECA ..> Acao
+  RegraECA ..> EventoComplexo : produz >
+}
+
+package "Domínio e gêmeo digital" {
+  class Cliente {
+    + id_cliente : String
+  }
+  class Conta
+  class Dispositivo
+  class Cartao
+  class GemeoDigitalCliente {
+    + dispositivos_confiaveis : Set
+    + favorecidos_habituais : Set
+    + perfil_valor_p95 : Money
+    + horarios_tipicos : Histograma
+    + estado_risco : BAIXO | MEDIO | ALTO
+  }
+  Cliente "1" *-- "1..*" Conta
+  Cliente "1" o-- "1..*" Dispositivo
+  Conta "1" o-- "0..*" Cartao
+  Cliente "1" -- "1" GemeoDigitalCliente : espelhado por >
+  GemeoDigitalCliente ..> Evento : atualizado por >
+  RegraECA ..> GemeoDigitalCliente : consulta >
+}
+@enduml

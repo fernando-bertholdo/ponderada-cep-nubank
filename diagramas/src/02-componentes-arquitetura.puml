@@ -1,0 +1,76 @@
+@startuml 02-componentes-arquitetura
+title Modelagem estática — componentes e tópicos (produtores → Kafka → CEP → consumidores)
+skinparam shadowing false
+skinparam componentStyle uml2
+left to right direction
+
+package "Produtores" {
+  [App Nubank\n(iOS/Android)] as APP
+  [Serviço de Conta\ne Autenticação] as AUTH
+  [Core Pix\n(iniciação)] as PIX
+  [Gateway SPI\n(Banco Central)] as SPI
+  [Autorizador\nde Cartão] as CARD
+  [Observabilidade\n(métricas/logs)] as OBS
+}
+
+package "Barramento de eventos (Apache Kafka)" {
+  queue "sessao.telemetria.v1" as T1
+  queue "conta.alteracoes.v1" as T2
+  queue "pix.transacoes.v1" as T3
+  queue "cartao.autorizacoes.v1" as T4
+  queue "spi.metricas.v1" as T5
+  queue "cep.eventos-complexos.v1" as TOUT
+  queue "dlq.quarentena.v1" as DLQ
+  [Schema Registry\n(contratos versionados)] as SR
+}
+
+package "Processamento de eventos complexos" {
+  [Validação de contrato\n+ deduplicação] as VAL
+  [Motor CEP\n(Apache Flink: janelas,\nwatermarks, padrões)] as CEP
+  [Repositório de\nregras ECA] as RULES
+  database "Estado do\nGêmeo Digital\ndo Cliente" as TWIN
+}
+
+package "Consumidores / atuação" {
+  [Orquestrador de Decisão\n(aprovar / desafiar /\ncancelar / reter)] as DEC
+  [Notificações\n(push, in-app)] as NOTIF
+  [Mesa de Prevenção\na Fraudes] as ANALYST
+  [Operação / SRE\n(modo degradado)] as SRE
+  [Data Lake / DW\n(histórico, MLOps)] as DW
+}
+
+APP --> T1
+AUTH --> T2
+PIX --> T3
+SPI --> T3
+SPI --> T5
+CARD --> T4
+OBS --> T5
+
+T1 --> VAL
+T2 --> VAL
+T3 --> VAL
+T4 --> VAL
+T5 --> VAL
+VAL ..> SR : valida schema
+VAL --> DLQ : evento inválido
+VAL --> CEP
+RULES --> CEP
+CEP <--> TWIN : lê / atualiza
+CEP --> TOUT
+
+TOUT --> DEC
+TOUT --> NOTIF
+TOUT --> ANALYST
+TOUT --> SRE
+TOUT --> DW
+T3 --> DW
+DEC --> PIX : decisão síncrona\n(pré-liquidação)
+DEC --> CARD : decisão síncrona\n(autorização)
+
+note bottom of CEP
+  Particionamento por id_cliente:
+  ordem garantida por cliente,
+  estado local por chave.
+end note
+@enduml
