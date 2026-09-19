@@ -1,0 +1,42 @@
+@startuml 04-sequencia-degradacao-spi
+title Modelagem dinâmica — sequência: evento técnico complexo de degradação do SPI (cenário 3)
+skinparam shadowing false
+autonumber
+
+participant "Gateway SPI" as SPI
+participant "Observabilidade" as OBS
+queue "Kafka" as K
+participant "Motor CEP" as CEP
+participant "Operação / SRE" as SRE
+participant "Core Pix" as PIX
+participant "App Nubank" as APP
+actor Cliente
+
+loop a cada envio ao SPI
+  SPI -> K : LatenciaSPIMedida(ms)
+  SPI -> K : ErroIntegracaoSPI(codigo)  [quando houver]
+end
+OBS -> K : lag do consumidor, fila de envio
+
+K -> CEP : eventos técnicos simples
+CEP -> CEP : agrega em janela deslizante de 60 s\n(taxa de erro, latência p99, tamanho da fila)
+
+alt taxa de erro > 2% E p99 > 3 s E fila crescendo (3 janelas seguidas)
+  CEP -> K : DegradacaoSPIDetectada (evento complexo)
+  K -> SRE : alerta com evidências
+  K -> PIX : ATIVAR_MODO_DEGRADADO
+  PIX -> PIX : retry com backoff exponencial\nreutilizando a mesma idempotency_key
+  PIX -> APP : status "Pix em processamento"
+  APP -> Cliente : aviso proativo\n(não repita a transferência)
+else métricas normalizam
+  CEP -> K : DegradacaoSPIEncerrada
+  K -> PIX : desativa modo degradado
+end
+
+note over PIX
+  Sem CEP: o cliente vê erro genérico,
+  repete o Pix e pode gerar duplicidade.
+  Com CEP: o mesmo pedido é reenviado
+  com a mesma chave de idempotência.
+end note
+@enduml

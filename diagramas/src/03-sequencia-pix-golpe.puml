@@ -1,0 +1,55 @@
+@startuml 03-sequencia-pix-golpe
+title Modelagem dinâmica — sequência: Pix com suspeita de golpe (cenário 1)
+skinparam shadowing false
+autonumber
+
+actor Cliente
+participant "App Nubank" as APP
+participant "Core Pix" as PIX
+queue "Kafka" as K
+participant "Motor CEP" as CEP
+database "Gêmeo Digital\ndo Cliente" as TWIN
+participant "Orquestrador\nde Decisão" as DEC
+participant "Gateway SPI" as SPI
+
+== Eventos simples que antecedem o Pix (janela de 30 min) ==
+APP -> K : DispositivoRegistrado(novo=true)
+APP -> K : LimiteAlterado(PIX_NOTURNO, 1.000 → 5.000)
+APP -> K : FavorecidoAdicionado(chave nunca usada)
+K -> CEP : consome (event-time + watermark)
+CEP -> TWIN : atualiza estado parcial do padrão
+
+== Gatilho ==
+Cliente -> APP : confirma Pix de R$ 4.800
+APP -> PIX : iniciarPix(idempotency_key)
+PIX -> K : PixIniciado
+K -> CEP : PixIniciado
+CEP -> TWIN : consulta perfil (p95 de valor,\nfavorecidos, dispositivos)
+TWIN --> CEP : perfil
+CEP -> CEP : avalia RegraECA R-PIX-01\n(4 evidências na janela)
+
+alt score de risco ALTO
+  CEP -> K : SuspeitaGolpeEngenhariaSocial\n(evento complexo, evidências)
+  K -> DEC : evento complexo
+  DEC -> PIX : DESAFIAR_AUTENTICACAO
+  PIX -> APP : exige confirmação reforçada\n+ alerta contextual de golpe
+  alt cliente desiste
+    Cliente -> APP : cancela
+    APP -> PIX : cancelarPix
+    PIX -> K : PixCancelado
+  else cliente confirma com biometria
+    Cliente -> APP : confirma
+    PIX -> SPI : envia ordem
+    SPI --> PIX : liquidado
+    PIX -> K : PixLiquidado
+  end
+else score de risco BAIXO
+  DEC -> PIX : APROVAR
+  PIX -> SPI : envia ordem
+  SPI --> PIX : liquidado
+  PIX -> K : PixLiquidado
+end
+
+K -> CEP : resultado da decisão
+CEP -> TWIN : realimenta gêmeo\n(malha fechada)
+@enduml

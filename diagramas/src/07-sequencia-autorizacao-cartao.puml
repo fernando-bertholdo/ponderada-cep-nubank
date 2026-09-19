@@ -1,0 +1,45 @@
+@startuml 07-sequencia-autorizacao-cartao
+title Modelagem dinâmica — sequência: autorização de cartão com contexto (cenário 2)
+skinparam shadowing false
+autonumber
+
+participant "Bandeira /\nAdquirente" as BAND
+participant "Autorizador\nde Cartão" as AUT
+queue "Kafka" as K
+participant "Motor CEP" as CEP
+database "Gêmeo Digital\ndo Cliente" as TWIN
+participant "App Nubank" as APP
+actor Cliente
+
+== Contexto já conhecido (eventos anteriores) ==
+APP -> K : LoginRealizado(geo = Recife, 08:10)
+K -> CEP : atualiza localização provável
+CEP -> TWIN : local_provavel = Recife
+
+== Pedido de autorização ==
+BAND -> AUT : compra presencial R$ 380\nem Recife (MCC restaurante)
+AUT -> K : CompraCartaoSolicitada
+K -> CEP : CompraCartaoSolicitada
+CEP -> TWIN : consulta contexto
+TWIN --> CEP : cliente mora em SP,\nmas app ativo em Recife há 2 h
+
+alt compra coerente com o contexto (viagem)
+  CEP -> K : ContextoViagemConfirmado
+  K -> AUT : APROVAR
+  AUT --> BAND : aprovada
+else padrão de teste de cartão\n(≥ 5 compras online < R$ 5 em 10 min,\nlojistas distintos)
+  CEP -> K : TesteDeCartao
+  K -> AUT : CANCELAR + bloquear cartão virtual
+  AUT --> BAND : negada
+  K -> APP : notificação: cartão bloqueado,\ngerar novo cartão virtual
+else negada só por limite, cliente com bom histórico
+  AUT --> BAND : negada (limite)
+  AUT -> K : CompraCartaoNegada(motivo = LIMITE)
+  K -> CEP : CompraCartaoNegada
+  CEP -> K : OportunidadeAjusteLimite
+  K -> APP : oferta de ajuste de limite em 1 toque
+  Cliente -> APP : aceita
+  APP -> K : LimiteAlterado(CARTAO)
+  note right of BAND : cliente refaz a compra\ne ela é aprovada
+end
+@enduml

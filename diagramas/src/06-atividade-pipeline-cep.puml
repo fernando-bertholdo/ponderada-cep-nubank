@@ -1,0 +1,38 @@
+@startuml 06-atividade-pipeline-cep
+title Modelagem dinâmica — atividade: do evento simples ao evento complexo
+skinparam shadowing false
+
+start
+:Consumir evento do tópico\n(partição = id_cliente);
+if (Contrato válido no Schema Registry?) then (não)
+  :Publicar em dlq.quarentena.v1;
+  :Alertar dono do produtor;
+  stop
+else (sim)
+endif
+if (id do evento já processado?) then (sim)
+  :Descartar (idempotência);
+  stop
+else (não)
+endif
+:Atribuir event-time (t_ocorrencia)\ne avançar watermark;
+if (Chegou depois do watermark\n+ atraso tolerado?) then (sim)
+  :Emitir EventoAtrasado\n(correção, não reescrita);
+  stop
+else (não)
+endif
+:Enriquecer com estado do\nGêmeo Digital do Cliente;
+fork
+  :Atualizar agregados em janela\n(tumbling / sliding / session);
+fork again
+  :Avaliar padrões das regras ECA\nsobre a janela;
+end fork
+if (Algum padrão casou?) then (sim)
+  :Calcular score de risco\ne escolher Ação;
+  :Publicar EventoComplexo\nem cep.eventos-complexos.v1;
+  :Registrar evidências\n(trilha de auditoria);
+else (não)
+endif
+:Atualizar Gêmeo Digital\n(malha fechada);
+stop
+@enduml

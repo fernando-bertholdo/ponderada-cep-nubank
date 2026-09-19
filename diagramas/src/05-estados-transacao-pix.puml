@@ -1,0 +1,29 @@
+@startuml 05-estados-transacao-pix
+title Modelagem dinâmica — máquina de estados da transação Pix orientada a eventos
+skinparam shadowing false
+
+[*] --> Iniciada : PixIniciado
+
+Iniciada --> EmAvaliacao : consumido pelo CEP
+EmAvaliacao --> Aprovada : risco BAIXO
+EmAvaliacao --> Desafiada : risco ALTO\n[SuspeitaGolpeEngenhariaSocial]
+EmAvaliacao --> Aprovada : timeout do CEP\n[fail-open com regras estáticas\ne valor ≤ limite]
+
+Desafiada --> Aprovada : cliente confirma\ncom biometria
+Desafiada --> Cancelada : cliente desiste\nou não confirma em 5 min
+
+Aprovada --> EnviadaSPI
+EnviadaSPI --> Liquidada : confirmação do SPI
+EnviadaSPI --> EmRetentativa : ErroIntegracaoSPI\n[modo degradado]
+EmRetentativa --> EnviadaSPI : retry\n(mesma idempotency_key)
+EmRetentativa --> Falhou : esgotou tentativas
+
+Liquidada --> Contestada : DevolucaoMEDSolicitada
+Contestada --> Devolvida : fraude confirmada
+Contestada --> Liquidada : contestação improcedente
+
+Cancelada --> [*]
+Falhou --> [*]
+Devolvida --> [*]
+Liquidada --> [*]
+@enduml
